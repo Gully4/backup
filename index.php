@@ -1,61 +1,37 @@
 <?php
 /**
  * PROJECT: Wedding Backup System — Enterprise Cyber Infrastructure
- * FILE: index.php
- * VERSION: BIFROST APOCALYPSE v9.0 [Omega Overkill Edition]
- * THEME: Cybernetic Obsidian, Volt Orange & Neon Emerald Deep Tech
- * DESCRIPTION: Multi-threaded Simulation, Quantum Encryption Integrity Monitor, & Neural Alert Matrix.
+ * FILE: index.php [LOKAL DECK]
+ * VERSION: BIFROST APOCALYPSE v9.6 [Mobile Optimized Framework]
  */
 
 date_default_timezone_set('Asia/Jakarta');
 
-// --- 🛠️ BACKEND TUNING & DAEMON KERNEL ---
 ignore_user_abort(true); 
 set_time_limit(0); 
 ini_set('memory_limit', '512M'); 
 
-// --- 🛠️ INTEGRASI TELEGRAM SENTINEL ---
-define('TELEGRAM_TOKEN', '8992003147:AAHDcE8mTItn5LKnuL4eY3_-aNJXpDzv4kQ'); 
-define('TELEGRAM_CHAT_ID', '7169837270'); 
+// === CONFIG UTAMA ===
+$urlTargetRemote  = "http://weddnghmtr.host.adellya.my.id/gallery/koder_photographer.php"; 
+$outputDir        = __DIR__ . "/backup_photographer/"; 
 
-// --- CONFIG PATH DIREKTORI ---
-$urlTargetRemote  = "https://weddnghmtr.host.adellya.my.id/gallery/koder_photographer.php"; 
-$localSourceDir   = __DIR__ . "/uploads_photographer/"; 
-$outputDir        = "backup_photographer/"; 
-$archiveDir       = "backup_archives/";
-$stateFile        = __DIR__ . "/bifrost_state.json";
-$logSystemFile    = __DIR__ . "/bifrost_system.log";
-
-$osName = php_uname('s');
-$phpVersion = phpversion();
-
-function sendTelegramAlert($message, $isCritical = false) {
-    if (TELEGRAM_TOKEN === 'YOUR_TELEGRAM_BOT_TOKEN_DISINI' || TELEGRAM_CHAT_ID === 'YOUR_CHAT_ID_DISINI') return;
-    $icon = $isCritical ? "🚨 [CRITICAL ANOMALY]" : "⚡ [TELEMETRY REPORT]";
-    $text = "$icon *BIFROST APOCALYPSE*\n\n" . $message . "\n\n📅 _" . date('Y-m-d H:i:s') . " WIB_";
-    $url = "https://api.telegram.org/bot" . TELEGRAM_TOKEN . "/sendMessage?chat_id=" . TELEGRAM_CHAT_ID . "&text=" . urlencode($text) . "&parse_mode=Markdown";
-    @file_get_contents($url);
+// Bikin folder backup di lokal kalau belum ada
+if (!file_exists($outputDir)) {
+    @mkdir($outputDir, 0755, true);
 }
 
-// --- INITIALIZER DIREKTORI ---
-foreach ([$outputDir, $archiveDir] as $dir) {
-    if (!file_exists($dir)) {
-        @mkdir($dir, 0755, true);
-    }
-}
-
-$isLocalhost = in_array($_SERVER['REMOTE_ADDR'], ['127.0.0.1', '::1']) || $_SERVER['SERVER_NAME'] === 'localhost';
-
+// === ENGINE AJAX CONTROLLER ===
 if (isset($_GET['action'])) {
     header('Content-Type: application/json');
 
+    // 1. Detektor Sinyal Radar
     if ($_GET['action'] === 'ping_radar') {
         $urlParts = parse_url($urlTargetRemote);
-        $host = $urlParts['host'] ?? 'weddinghamtar.com';
+        $host = $urlParts['host'] ?? 'weddnghmtr.host.adellya.my.id';
         $startTime = microtime(true);
-        $fp = @fsockopen($host, 443, $errno, $errstr, 3);
+        $fp = @fsockopen($host, 443, $errno, $errstr, 2);
         $stopTime = microtime(true);
-        
+
         if ($fp) {
             fclose($fp);
             $latency = round(($stopTime - $startTime) * 1000);
@@ -66,369 +42,225 @@ if (isset($_GET['action'])) {
         exit;
     }
 
+    // 2. Mesin Sinkronisasi Gambar Riil via cURL
     if ($_GET['action'] === 'daemon_start') {
-        $lockFile = __DIR__ . '/bifrost_core.lock';
-        if (file_exists($lockFile) && (time() - filemtime($lockFile) < 4)) {
-            echo json_encode(["status" => "active", "pulse" => time()]);
+        $actualLocalFiles = glob($outputDir . '*.{jpg,jpeg,png,JPG,JPEG,PNG}', GLOB_BRACE);
+        $actualFileNames = array_map('basename', $actualLocalFiles);
+
+        $finalUrl = $urlTargetRemote . '?downloaded=' . urlencode(implode(',', $actualFileNames));
+
+        $ch = curl_init();
+        curl_setopt($ch, CURLOPT_URL, $finalUrl);
+        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+        curl_setopt($ch, CURLOPT_TIMEOUT, 30);
+        curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false); 
+        curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, false);
+        $response = curl_exec($ch);
+
+        if (curl_errno($ch)) {
+            $error_msg = curl_error($ch);
+            curl_close($ch);
+            echo json_encode(["status" => "error", "message" => "cURL Error: " . $error_msg]);
             exit;
         }
-        file_put_contents($lockFile, time());
-        
-        $batchLimit = 5; 
-        $filesProcessed = 0;
-        $currentState = file_exists($stateFile) ? json_decode(file_get_contents($stateFile), true) : [];
-        if (!is_array($currentState)) $currentState = [];
+        curl_close($ch);
 
-        if (!$isLocalhost && file_exists($localSourceDir)) {
-            $sourceFiles = glob($localSourceDir . '*.{jpg,jpeg,png,JPG,JPEG,PNG}', GLOB_BRACE);
-            foreach ($sourceFiles as $sourcePath) {
-                if ($filesProcessed >= $batchLimit) break;
-                $fileName = basename($sourcePath);
+        if ($response !== false) {
+            $data = json_decode($response, true);
+            if ($data && isset($data['status']) && $data['status'] === 'success') {
+                $fileName = $data['filename'];
                 $targetPath = $outputDir . $fileName;
-                
-                if (!file_exists($targetPath) || !isset($currentState[$fileName])) {
-                    if (@copy($sourcePath, $targetPath)) {
-                        $secureHash = md5_file($targetPath);
-                        $currentState[$fileName] = ["timestamp" => time(), "hash" => $secureHash, "size" => filesize($targetPath)];
-                        $filesProcessed++;
-                    }
+
+                $decodedData = base64_decode($data['base64_data']);
+                if ($decodedData !== false) {
+                    file_put_contents($targetPath, $decodedData);
+                    echo json_encode([
+                        "status" => "success", 
+                        "message" => "Synchronized package: " . $fileName
+                    ]);
+                } else {
+                    echo json_encode(["status" => "error", "message" => "Corrupted base64 payload data."]);
                 }
-            }
-            if ($filesProcessed > 0) {
-                file_put_contents($stateFile, json_encode($currentState));
-                file_put_contents(__DIR__ . '/bifrost_shared.json', json_encode(["status" => "saved", "message" => "Synchronized $filesProcessed items via Local FS Pipeline", "count" => $filesProcessed]));
-            }
-        }
-
-        if ($isLocalhost) {
-            $actualLocalFiles = glob($outputDir . '*.{jpg,jpeg,png,JPG,JPEG,PNG}', GLOB_BRACE);
-            $actualFileNames = array_map('basename', $actualLocalFiles);
-            $finalUrl = $urlTargetRemote . '?downloaded=' . urlencode(implode(',', $actualFileNames));
-            
-            $ch = curl_init();
-            curl_setopt($ch, CURLOPT_URL, $finalUrl);
-            curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-            curl_setopt($ch, CURLOPT_TIMEOUT, 10);
-            curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
-            $response = curl_exec($ch);
-            curl_close($ch);
-            
-            if ($response !== false) {
-                $data = json_decode($response, true);
-                if ($data && $data['status'] === 'success') {
-                    $fileName = $data['filename'];
-                    $targetPath = $outputDir . $fileName;
-                    if (!file_exists($targetPath)) {
-                        file_put_contents($targetPath, base64_decode($data['base64_data']));
-                    }
-                    
-                    $secureHash = md5($data['base64_data']);
-                    $currentState[$fileName] = ["timestamp" => time(), "hash" => $secureHash, "size" => filesize($targetPath)];
-                    file_put_contents($stateFile, json_encode($currentState));
-                    file_put_contents(__DIR__ . '/bifrost_shared.json', json_encode(["status" => "saved", "message" => "Pulled: $fileName", "count" => 1]));
-                    $filesProcessed = 1;
-                }
+                exit;
+            } else {
+                echo json_encode([
+                    "status" => "idle", 
+                    "message" => isset($data['message']) ? $data['message'] : "No new data packets detected."
+                ]);
+                exit;
             }
         }
-
-        @unlink($lockFile);
-        echo json_encode(["status" => "success", "processed" => $filesProcessed]);
-        exit;
-    }
-
-    if ($_GET['action'] === 'get_status') {
-        $logFile = __DIR__ . '/bifrost_shared.json';
-        if (file_exists($logFile)) {
-            $data = json_decode(file_get_contents($logFile), true);
-            @unlink($logFile);
-            echo json_encode($data);
-        } else {
-            echo json_encode(["status" => "idle"]);
-        }
+        echo json_encode(["status" => "error", "message" => "Failed to fetch response payload from target remote server."]);
         exit;
     }
 }
 
-$folderSize = 0; $totalPhotosCount = 0; $jpgCount = 0; $pngCount = 0;
-$latestFilesList = [];
+// === LOGIK UNTUK PENGISIAN DATA DASHBOARD ===
+$totalPhotosCount = 0;
+$folderSize = 0;
 
 if (file_exists($outputDir)) {
     $foundFiles = glob($outputDir . '*.{jpg,jpeg,png,JPG,JPEG,PNG}', GLOB_BRACE);
     $totalPhotosCount = count($foundFiles);
-    usort($foundFiles, function($a, $b) { return filemtime($b) - filemtime($a); });
-    
-    foreach ($foundFiles as $index => $file) {
-        $fSize = filesize($file);
-        $folderSize += $fSize;
-        $ext = strtolower(pathinfo($file, PATHINFO_EXTENSION));
-        if (in_array($ext, ['jpg', 'jpeg'])) $jpgCount++;
-        if ($ext === 'png') $pngCount++;
-
-        if ($index < 5) {
-            $latestFilesList[] = [
-                "name" => basename($file),
-                "size" => round($fSize / 1024, 1) . " KB",
-                "time" => date('H:i:s', filemtime($file))
-            ];
-        }
+    foreach ($foundFiles as $file) {
+        $folderSize += filesize($file);
     }
 }
-
 $folderSizeMB = round($folderSize / (1024 * 1024), 2);
-$maxStorageLimit = 4096; 
-$storagePercent = round(($folderSizeMB / $maxStorageLimit) * 100, 2);
 ?>
 <!DOCTYPE html>
 <html lang="id">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>💥 BIFROST APOCALYPSE v9.0 — Omega Overkill Interface</title>
-    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;600;700&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+    <title>🌌 BIFROST APOCALYPSE v9.6 — Mobile UI Fixed</title>
+    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@600;700&family=JetBrains+Mono&display=swap" rel="stylesheet">
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; }
-        body { font-family: 'Space Grotesk', sans-serif; background: #010409; color: #c9d1d9; padding: 40px 20px; }
-        .wrapper { max-width: 1200px; margin: 0 auto; }
-        
-        .master-mainframe { background: linear-gradient(180deg, #0d1117 0%, #161b22 100%); border: 2px solid #30363d; border-radius: 24px; padding: 35px; box-shadow: 0 0 80px rgba(249, 115, 22, 0.08), inset 0 0 20px rgba(0,0,0,0.6); position: relative; }
-        .master-mainframe::before { content: ''; position: absolute; top: 0; left: 0; width: 100%; height: 4px; background: linear-gradient(90deg, #f97316, #a855f7, #10b981); border-radius: 24px 24px 0 0; }
-        
-        .mainframe-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 30px; padding-bottom: 20px; border-bottom: 1px solid #21262d; }
-        h1 { font-family: 'Space Grotesk', sans-serif; font-size: 24px; font-weight: 700; color: #f0f6fc; letter-spacing: 2px; }
-        .quantum-badge { background: rgba(16, 185, 129, 0.1); border: 1px solid #10b981; color: #10b981; font-family: 'JetBrains Mono', monospace; font-size: 11px; padding: 6px 14px; border-radius: 30px; font-weight: 700; display: flex; align-items: center; gap: 8px; box-shadow: 0 0 15px rgba(16, 185, 129, 0.2); }
-        
-        .grid-trio { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 20px; margin-bottom: 25px; }
-        .module-bay { background: #0d1117; border: 1px solid #30363d; border-radius: 16px; padding: 20px; position: relative; overflow: hidden; }
-        .module-title { font-size: 11px; font-weight: 700; color: #8b949e; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 15px; display: flex; justify-content: space-between; align-items: center; }
-        
-        .radar-sweeper { display: flex; align-items: center; gap: 20px; background: #161b22; padding: 12px; border-radius: 12px; border: 1px solid #21262d; }
-        .radar-wave { width: 40px; height: 40px; border-radius: 50%; background: radial-gradient(circle, rgba(249,115,22,0.4) 0%, rgba(0,0,0,0) 70%); border: 1px dashed #f97316; position: relative; animation: spin-radar 4s linear infinite; }
-        @keyframes spin-radar { 100% { transform: rotate(360deg); } }
-        .radar-wave::after { content: ''; position: absolute; top: 0; left: 50%; width: 2px; height: 50%; background: #f97316; transform-origin: bottom center; }
-        .tele-stat { font-family: 'JetBrains Mono', monospace; font-size: 14px; font-weight: 700; color: #58a6ff; }
-        
-        .matrix-flow-box { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
-        .matrix-bit { background: #161b22; font-family: 'JetBrains Mono', monospace; font-size: 10px; padding: 6px; border-radius: 6px; text-align: center; color: #8b949e; border: 1px solid #21262d; }
-        .matrix-bit.active { color: #1f6feb; border-color: #388bfd; font-weight: bold; }
-        
-        .storage-reactor { background: #161b22; border: 1px solid #30363d; border-radius: 16px; padding: 20px; margin-bottom: 25px; }
-        .reactor-header { display: flex; justify-content: space-between; font-family: 'JetBrains Mono', monospace; font-size: 12px; margin-bottom: 12px; }
-        .rail-track { width: 100%; height: 12px; background: #0d1117; border-radius: 20px; overflow: hidden; border: 1px solid #21262d; position: relative; }
-        .rail-charge { height: 100%; background: linear-gradient(90deg, #388bfd, #58a6ff, #1f6feb); border-radius: 20px; }
-        
-        .quad-dock { display: grid; grid-template-columns: repeat(4, 1fr); gap: 15px; margin-bottom: 25px; }
-        .dock-node { background: #0d1117; border: 1px solid #30363d; border-radius: 14px; padding: 18px; text-align: center; }
-        .dock-value { font-family: 'JetBrains Mono', monospace; font-size: 26px; font-weight: 700; color: #f0f6fc; }
-        .dock-lbl { font-size: 10px; color: #8b949e; text-transform: uppercase; margin-top: 6px; font-weight: 600; letter-spacing: 1px; }
-        
-        .split-deck { display: grid; grid-template-columns: 1.2fr 0.8fr; gap: 20px; margin-bottom: 25px; }
-        .terminal-mainframe { background: #05070a; border: 1px solid #30363d; border-radius: 18px; padding: 22px; height: 320px; display: flex; flex-direction: column; }
-        .terminal-bar { display: flex; justify-content: space-between; font-family: 'JetBrains Mono', monospace; font-size: 11px; color: #f97316; border-bottom: 1px solid #21262d; padding-bottom: 10px; margin-bottom: 12px; }
-        .terminal-body { flex-grow: 1; overflow-y: auto; font-family: 'JetBrains Mono', monospace; font-size: 11px; line-height: 1.8; color: #8b949e; }
-        .log-ln { margin-bottom: 5px; display: flex; gap: 8px; }
-        
-        .live-inventory-deck { background: #0d1117; border: 1px solid #30363d; border-radius: 18px; padding: 22px; height: 320px; overflow-y: auto; }
-        .deck-title { font-size: 12px; font-weight: 700; color: #58a6ff; text-transform: uppercase; margin-bottom: 15px; letter-spacing: 1px; }
-        table { width: 100%; border-collapse: collapse; font-family: 'JetBrains Mono', monospace; font-size: 11px; }
-        th { color: #8b949e; padding-bottom: 10px; border-bottom: 2px solid #21262d; text-align: left; }
-        td { padding: 10px 0; color: #c9d1d9; border-bottom: 1px dashed #21262d; }
-        
-        .action-cluster { display: flex; gap: 15px; }
-        .btn-apocalypse { flex: 1; background: linear-gradient(135deg, #1f6feb, #388bfd); color: #fff; border: none; padding: 16px; border-radius: 12px; font-family: 'Space Grotesk', sans-serif; font-size: 12px; font-weight: 700; text-transform: uppercase; cursor: pointer; transition: all 0.2s ease; letter-spacing: 1px; }
-        .btn-apocalypse.orange { background: linear-gradient(135deg, #f97316, #ea580c); }
-        .btn-apocalypse.danger { background: #21262d; border: 1px solid #30363d; color: #8b949e; }
-        
-        .beacon-pulse-dot { width: 8px; height: 8px; background: #10b981; border-radius: 50%; display: inline-block; animation: neon-shimmer 1.5s infinite ease-in-out; }
-        @keyframes neon-shimmer { 0%, 100% { opacity: 0.4; transform: scale(1); } 50% { opacity: 1; transform: scale(1.3); } }
+        body { font-family: 'Space Grotesk', sans-serif; background: #010409; color: #c9d1d9; padding: 20px 12px; }
+        .master-mainframe { background: linear-gradient(180deg, #0d1117 0%, #161b22 100%); border: 2px solid #30363d; border-radius: 16px; padding: 20px; max-width: 1100px; margin: 0 auto; position: relative; box-shadow: 0 0 50px rgba(249,115,22,0.05); overflow: hidden; }
+        .master-mainframe::before { content: ''; position: absolute; top: 0; left: 0; width: 100%; height: 4px; background: linear-gradient(90deg, #f97316, #10b981, #58a6ff); border-radius: 16px 16px 0 0; }
+
+        .header { display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #21262d; padding-bottom: 15px; margin-bottom: 20px; gap: 10px; flex-wrap: wrap; }
+        h1 { font-size: 20px; font-weight: 700; color: #f0f6fc; letter-spacing: 0.5px; }
+        .status-badge { font-family:'JetBrains Mono'; font-size: 10px; color:#10b981; background:rgba(16,185,129,0.1); border:1px solid #10b981; padding:4px 10px; border-radius:20px; white-space: nowrap; }
+
+        .grid-trio { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 15px; margin-bottom: 20px; }
+        .module-bay { background: #0d1117; border: 1px solid #30363d; border-radius: 12px; padding: 15px; width: 100%; }
+        .module-title { font-size: 10px; font-weight: 700; color: #8b949e; text-transform: uppercase; margin-bottom: 12px; letter-spacing: 0.5px; }
+
+        .radar-sweeper { display: flex; align-items: center; gap: 12px; background: #161b22; padding: 10px; border-radius: 8px; border: 1px solid #21262d; }
+        .radar-wave { width: 28px; height: 28px; border-radius: 50%; border: 1px dashed #f97316; flex-shrink: 0; animation: spin 4s linear infinite; }
+        @keyframes spin { 100% { transform: rotate(360deg); } }
+
+        .terminal-box { background: #05070a; border: 1px solid #30363d; border-radius: 10px; padding: 12px; height: 180px; overflow-y: auto; font-family: 'JetBrains Mono', monospace; font-size: 11px; color: #8b949e; line-height: 1.5; word-break: break-all; }
+
+        .btn-cluster { display: flex; gap: 12px; flex-wrap: wrap; }
+        .btn { flex: 1; min-width: 200px; padding: 14px; border-radius: 8px; border: none; font-weight: 700; cursor: pointer; color: white; text-transform: uppercase; font-size: 11px; letter-spacing: 0.5px; transition: opacity 0.2s; display: flex; align-items: center; justify-content: center; gap: 6px; }
+        .btn:hover { opacity: 0.9; }
+        .btn-orange { background: linear-gradient(135deg, #f97316, #ea580c); }
+        .btn-blue { background: linear-gradient(135deg, #1f6feb, #388bfd); }
+
+        /* === MEDIA QUERY RESPONSIVE UNTUK LAYAR HP === */
+        @media (max-width: 600px) {
+            body { padding: 10px 6px; }
+            .master-mainframe { padding: 15px; border-radius: 12px; }
+            .header { flex-direction: column; align-items: flex-start; gap: 8px; }
+            h1 { font-size: 18px; }
+            .grid-trio { grid-template-columns: 1fr; gap: 12px; }
+            .btn-cluster { flex-direction: column; gap: 10px; }
+            .btn { width: 100%; flex: none; }
+        }
     </style>
 </head>
 <body>
 
-<div class="wrapper">
-    <div class="master-mainframe">
-        
-        <div class="mainframe-header">
-            <h1>🌌 BIFROST APOCALYPSE <span style="color:#f97316;">v9.0</span></h1>
-            <div class="quantum-badge"><span class="beacon-pulse-dot"></span> INTEGRITY STATE: QUANTUM ENCRYPTED</div>
-        </div>
+<div class="master-mainframe">
+    <div class="header">
+        <h1>🌌 BIFROST APOCALYPSE v9.6</h1>
+        <span class="status-badge">● CORE ENGINE ACTIVE</span>
+    </div>
 
-        <div class="grid-trio">
-            <div class="module-bay">
-                <div class="module-title">📡 Target Latency Radar <span>ONLINE</span></div>
-                <div class="radar-sweeper">
-                    <div class="radar-wave"></div>
-                    <div class="tele-stat" id="radarPing">-- ms</div>
-                </div>
-            </div>
-            
-            <div class="module-bay">
-                <div class="module-title">🧬 Quantum Entropy Balancer</div>
-                <div class="matrix-flow-box">
-                    <div class="matrix-bit active" id="bit-1">01</div>
-                    <div class="matrix-bit" id="bit-2">FF</div>
-                    <div class="matrix-bit active" id="bit-3">9C</div>
-                    <div class="matrix-bit" id="bit-4">E2</div>
-                </div>
-            </div>
-
-            <div class="module-bay">
-                <div class="module-title">📊 Format Distribution Matrix</div>
-                <div style="font-family: 'JetBrains Mono', monospace; font-size: 11px; color:#8b949e;">
-                    <div style="display:flex; justify-content:space-between; margin-bottom: 4px;"><span>JPG:</span> <span style="color:#f97316; font-weight:bold;"><?php echo $jpgCount; ?> items</span></div>
-                    <div style="display:flex; justify-content:space-between;"><span>PNG:</span> <span style="color:#a855f7; font-weight:bold;"><?php echo $pngCount; ?> items</span></div>
-                </div>
+    <div class="grid-trio">
+        <!-- NODE RADAR -->
+        <div class="module-bay">
+            <div class="module-title">📡 Remote Node Latency</div>
+            <div class="radar-sweeper">
+                <div class="radar-wave"></div>
+                <div id="radarPing" style="font-family:'JetBrains Mono'; font-weight:bold; color:#f97316; font-size: 13px;">Intercepting...</div>
             </div>
         </div>
 
-        <div class="storage-reactor">
-            <div class="reactor-header">
-                <span style="color:#f0f6fc; font-weight:700;">💾 MAIN REPOSITORY BLOCK DETECTOR</span>
-                <span><?php echo $folderSizeMB; ?> MB / <?php echo $maxStorageLimit; ?> MB (<?php echo $storagePercent; ?>%)</span>
-            </div>
-            <div class="rail-track">
-                <div class="rail-charge" style="width: <?php echo min($storagePercent, 100); ?>%;"></div>
-            </div>
-        </div>
-
-        <div class="quad-dock">
-            <div class="dock-node">
-                <div class="dock-value"><?php echo $totalPhotosCount; ?></div>
-                <div class="dock-lbl">Secure Node Files</div>
-            </div>
-            <div class="dock-node">
-                <div class="dock-value" id="nodeCycles" style="color: #a855f7;">0</div>
-                <div class="dock-lbl">Cron Engine Loops</div>
-            </div>
-            <div class="dock-node">
-                <div class="dock-value" id="nodePipeline" style="color: #10b981;">SECURE</div>
-                <div class="dock-lbl">Pipeline Integrity</div>
-            </div>
-            <div class="dock-node">
-                <div class="dock-value" id="nodeBandwidth" style="color: #58a6ff;">-- Mbps</div>
-                <div class="dock-lbl">Simulated Stream</div>
+        <!-- REPOSITORY STATISTICS -->
+        <div class="module-bay">
+            <div class="module-title">💾 Local Repository Metrics</div>
+            <div style="font-family:'JetBrains Mono', monospace; font-size:12px; line-height: 1.6;">
+                Files Synced : <span style="color:#f0f6fc; font-weight:bold;"><?php echo $totalPhotosCount; ?> Elements</span><br>
+                Disk Storage : <span style="color:#10b981; font-weight:bold;"><?php echo $folderSizeMB; ?> MB</span>
             </div>
         </div>
 
-        <div class="split-deck">
-            <div class="terminal-mainframe">
-                <div class="terminal-bar">
-                    <span>📟 NEURAL COMMUNICATIONS TERMINAL</span>
-                    <span id="mainframeClock">00:00:00</span>
-                </div>
-                <div class="terminal-body" id="termBody">
-                    <div class="log-ln"><span style="color:#10b981;">[SYSTEM] Core logic v9.0 synchronized globally. Ready for transmission override.</span></div>
-                    <div class="log-ln"><span style="color:#f97316;">[DAEMON] Awaiting remote server pipeline telemetry hook.</span></div>
-                </div>
-            </div>
-
-            <div class="live-inventory-deck">
-                <div class="deck-title">🗂️ Live File Ledger</div>
-                <table>
-                    <thead>
-                        <tr>
-                            <th>Ident Block</th>
-                            <th>Size Allocation</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <?php if(empty($latestFilesList)): ?>
-                            <tr><td colspan="2" style="color:#484f58; text-align:center; padding-top:40px;">No incoming data packages.</td></tr>
-                        <?php else: ?>
-                            <?php foreach($latestFilesList as $fileItem): ?>
-                                <tr>
-                                    <td style="color:#f0f6fc;">📦 <?php echo $fileItem['name']; ?></td>
-                                    <td><span style="color:#58a6ff;"><?php echo $fileItem['size']; ?></span></td>
-                                </tr>
-                            <?php endforeach; ?>
-                        <?php endif; ?>
-                    </tbody>
-                </table>
+        <!-- DIAGNOSTICS -->
+        <div class="module-bay">
+            <div class="module-title">⚙️ Kernel Telemetry Diagnostics</div>
+            <div style="font-family:'JetBrains Mono', monospace; font-size:11px; color:#8b949e; line-height: 1.6;">
+                PHP ARCH : <span style="color:#58a6ff;"><?php echo PHP_VERSION; ?></span><br>
+                OS STACK : <span style="color:#a855f7;"><?php echo PHP_OS; ?></span>
             </div>
         </div>
+    </div>
 
-        <div class="action-cluster">
-            <button class="btn-apocalypse orange" onclick="engageManualOverride()">⚡ TRIGGER OMEGA STREAM INTERRUPT</button>
-            <button class="btn-apocalypse" onclick="triggerQuantumSync()">🧬 SYNC QUANTUM CELLS</button>
-            <button class="btn-apocalypse danger" onclick="clearTermSpace()">🧹 FLUSH TELEMETRY ARCHIVE</button>
+    <!-- MAIN OPERATIONAL LOG TERMINAL -->
+    <div class="module-bay" style="margin-bottom: 20px;">
+        <div class="module-title">📟 Operational Core Telemetry Log</div>
+        <div class="terminal-box" id="termBody">
+            <div>[SYSTEM] Framework v9.6 mobile fluid adaptation loaded.</div>
+            <div>[SYSTEM] Local pipelines standby. Awaiting telemetry stream hooks...</div>
         </div>
+    </div>
 
+    <div class="btn-cluster">
+        <button class="btn btn-orange" onclick="triggerManualSync()">⚡ Force Pipeline Run</button>
+        <button class="btn btn-blue" onclick="checkRadarNow()">🔄 Recalibrate Signal Radar</button>
     </div>
 </div>
 
 <script>
-let cronLoops = 0;
+let isSyncRunning = false;
 
-setInterval(() => {
-    document.getElementById('mainframeClock').innerText = new Date().toLocaleTimeString('id-ID');
-}, 1000);
-
-function logTerminal(message, color = '#8b949e') {
-    const tBody = document.getElementById('termBody');
-    const timeStr = new Date().toLocaleTimeString('id-ID');
-    const logRow = document.createElement('div');
-    logRow.className = 'log-ln';
-    logRow.innerHTML = `<span style="color:${color}">[${timeStr}] ${message}</span>`;
-    tBody.appendChild(logRow);
-    tBody.scrollTop = tBody.scrollHeight;
+function logToTerminal(message, color = '#8b949e') {
+    const term = document.getElementById('termBody');
+    const time = new Date().toLocaleTimeString('id-ID');
+    term.innerHTML += `<div style="color:${color}">[${time}] ${message}</div>`;
+    term.scrollTop = term.scrollHeight;
 }
 
-async function pingTelemetryRadar() {
+async function checkRadarNow() {
     try {
-        let response = await fetch('?action=ping_radar');
-        let data = await response.json();
-        const rNode = document.getElementById('radarPing');
-        if(data.status === 'online') {
-            rNode.innerText = `${data.latency} ms`;
-            rNode.style.color = '#10b981';
-            document.getElementById('nodeBandwidth').innerText = `${(1000 / data.latency * 8.4).toFixed(2)} Mbps`;
-            
-            document.getElementById('bit-2').innerText = Math.floor(Math.random()*256).toString(16).toUpperCase();
-            document.getElementById('bit-4').innerText = Math.floor(Math.random()*256).toString(16).toUpperCase();
+        let res = await fetch('?action=ping_radar');
+        let data = await res.json();
+        const pingNode = document.getElementById('radarPing');
+        if (data.status === 'online') {
+            pingNode.innerText = `${data.latency} ms (CONNECTED)`;
+            pingNode.style.color = '#10b981';
         } else {
-            rNode.innerText = 'TIMEOUT';
-            rNode.style.color = '#f85149';
+            pingNode.innerText = 'OFFLINE / TIMEOUT';
+            pingNode.style.color = '#f85149';
         }
-    } catch(e){}
-}
-
-async function engageManualOverride() {
-    logTerminal("MANUAL OVERRIDE: Injecting interrupt routine payload into pipeline kernel...", "#a855f7");
-    try {
-        let response = await fetch('?action=daemon_start');
-        let data = await response.json();
-        if(data.status === 'success') {
-            logTerminal("Pipeline successfully flushed. Re-indexing live database structures...", "#10b981");
-            setTimeout(() => { window.location.reload(); }, 1200);
-        }
-    } catch(e) {
-        logTerminal("Interrupt failed: Target socket refused handshakes.", "#f85149");
+    } catch (e) {
+        logToTerminal("Radar Error: Failed to catch host data handshake.", "#f85149");
     }
 }
 
-function triggerQuantumSync() {
-    logTerminal("Re-aligning entropy matrix cell nodes... Balance achieved.", "#58a6ff");
-    document.getElementById('nodePipeline').innerText = "SYNCHRONIZED";
-    document.getElementById('nodePipeline').style.color = "#58a6ff";
-}
+async function triggerManualSync() {
+    if (isSyncRunning) return;
+    isSyncRunning = true;
 
-function clearTermSpace() {
-    document.getElementById('termBody').innerHTML = '';
-    logTerminal("Terminal space cleared by operator execution.", "#f97316");
-}
+    logToTerminal("Executing network sync sweep pipeline...", "#f97316");
+    try {
+        let res = await fetch('?action=daemon_start');
+        let data = await res.json();
 
-async function autoLoopDaemon() {
-    cronLoops++;
-    document.getElementById('nodeCycles').innerText = cronLoops;
-    fetch('?action=daemon_start').catch(() => {});
+        if (data.status === 'success') {
+            logToTerminal(`[SUCCESS] ${data.message}`, '#10b981');
+            setTimeout(() => { window.location.reload(); }, 1000);
+        } else if (data.status === 'idle') {
+            logToTerminal(`[IDLE] ${data.message}`, '#58a6ff');
+        } else {
+            logToTerminal(`[ERROR] ${data.message}`, '#f85149');
+        }
+    } catch(e) {
+        logToTerminal("Pipeline stream error: Connection timed out or server execution limits hit.", "#f85149");
+    } finally {
+        isSyncRunning = false;
+    }
 }
 
 window.addEventListener('DOMContentLoaded', () => {
-    pingTelemetryRadar();
-    autoLoopDaemon();
-    setInterval(pingTelemetryRadar, 4000);
-    setInterval(autoLoopDaemon, 8000);
+    checkRadarNow();
+    setInterval(checkRadarNow, 5000);
+    setInterval(triggerManualSync, 10000);
 });
 </script>
-
 </body>
 </html>
